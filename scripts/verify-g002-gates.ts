@@ -13,6 +13,15 @@ import * as path from "node:path";
 
 const repoRoot = path.join(import.meta.dir, "..");
 const EXPECTED_DEFINITIONS = ["deep-interview", "ralplan", "team", "ultragoal"] as const;
+const EXPECTED_PUBLIC_PACKAGE_VERSION = "0.1.0";
+const ALLOWED_PRIVATE_PACKAGE_VERSIONS = new Map<string, string>([["@gajae-code/typescript-edit-benchmark", "0.0.1"]]);
+const ALLOWED_PACKAGE_BINARIES = new Map<string, readonly string[]>([
+	["@gajae-code/ai", ["pi-ai"]],
+	["@gajae-code/coding-agent", ["gjc"]],
+	["@gajae-code/stats", ["gjc-stats"]],
+	["@gajae-code/swarm-extension", ["gjc-swarm"]],
+	["@gajae-code/typescript-edit-benchmark", ["typescript-edit-benchmark"]],
+]);
 const PUBLIC_DOC_FILES = ["README.md", "packages/coding-agent/README.md"] as const;
 const FORBIDDEN_PUBLIC_DOC_PATTERNS: readonly RegExp[] = [
 	/@oh-my-pi/u,
@@ -47,6 +56,26 @@ const FORBIDDEN_SKILL_PATTERNS: readonly RegExp[] = [
 	/MCP/u,
 	/\/mcp/u,
 ];
+const FORBIDDEN_PUBLIC_WORKFLOW_EXPORT_BLOCKS = [
+	"./autoresearch",
+	"./autoresearch/*",
+	"./autoresearch/tools/*",
+	"./commands/autoresearch",
+	"./commands/ralph",
+	"./commands/ultraqa",
+	"./commands/ultrawork",
+	"./commands/performance-goal",
+] as const;
+const FORBIDDEN_WORKFLOW_SURFACE_TOKENS = [
+	"autopilot",
+	"autoresearch",
+	"autoresearch-goal",
+	"performance-goal",
+	"ralph",
+	"ultraqa",
+	"ultrawork",
+	"visual-ralph",
+] as const;
 const REQUIRED_PRIVATE_EXPORT_BLOCKS = [
 	"./mcp",
 	"./mcp/*",
@@ -112,8 +141,10 @@ interface GateResult {
 const results: GateResult[] = [];
 
 results.push(await verifyRebrandSurface());
+results.push(await verifyPackageVersionAndBinaryAllowlist());
 results.push(await verifyVisibleDefinitions());
 results.push(await verifyPublicDefinitionContent());
+results.push(await verifyBroadWorkflowExposure());
 results.push(await verifyMcpQuarantine());
 results.push(await verifyLocalToolsPreserved());
 results.push(await verifyRustBoundary());
@@ -152,6 +183,64 @@ async function verifyRebrandSurface(): Promise<GateResult> {
 		name: "rebrand CLI/package surface",
 		passed: rootName === "gajae-code" && codingName.includes("gajae") && hasGjcBin && !hasLegacyOmpBin,
 		details,
+	};
+}
+
+
+async function verifyPackageVersionAndBinaryAllowlist(): Promise<GateResult> {
+	const packagePaths = listPackageJsonPaths();
+	const versionFindings: string[] = [];
+	const nameFindings: string[] = [];
+	const binaryFindings: string[] = [];
+
+	for (const relativePath of packagePaths) {
+		const packageJson = await readJson(relativePath);
+		const packageName = typeof packageJson.name === "string" ? packageJson.name : "<missing>";
+		const packageVersion = typeof packageJson.version === "string" ? packageJson.version : "<missing>";
+		const isPrivate = packageJson.private === true;
+
+		if (relativePath === "package.json") {
+			if (packageName !== "gajae-code") nameFindings.push(`${relativePath}: expected gajae-code, found ${packageName}`);
+			continue;
+		}
+
+		if (!packageName.startsWith("@gajae-code/")) {
+			nameFindings.push(`${relativePath}: package name ${packageName} is outside @gajae-code scope`);
+		}
+
+		const allowedPrivateVersion = ALLOWED_PRIVATE_PACKAGE_VERSIONS.get(packageName);
+		const expectedVersion = isPrivate && allowedPrivateVersion ? allowedPrivateVersion : EXPECTED_PUBLIC_PACKAGE_VERSION;
+		if (packageVersion !== expectedVersion) {
+			versionFindings.push(`${relativePath}: ${packageName} version ${packageVersion} != ${expectedVersion}`);
+		}
+
+		const bin = isRecord(packageJson.bin) ? packageJson.bin : undefined;
+		const actualBins = bin ? Object.keys(bin).sort() : [];
+		const allowedBins = [...(ALLOWED_PACKAGE_BINARIES.get(packageName) ?? [])].sort();
+		const unexpectedBins = actualBins.filter(name => !allowedBins.includes(name));
+		const missingBins = allowedBins.filter(name => !actualBins.includes(name));
+		const legacyBins = actualBins.filter(name => /^(omp|omx|pi-coding-agent)$/u.test(name));
+		if (unexpectedBins.length > 0 || missingBins.length > 0 || legacyBins.length > 0) {
+			binaryFindings.push(
+				`${relativePath}: bins actual=${actualBins.join(",") || "<none>"} allowed=${allowedBins.join(",") || "<none>"} legacy=${legacyBins.join(",") || "<none>"}`,
+			);
+		}
+	}
+
+	const cargoWorkspace = await readText("Cargo.toml");
+	const cargoVersion = /^version\s*=\s*"([^"]+)"/mu.exec(cargoWorkspace)?.[1] ?? "<missing>";
+	if (cargoVersion !== EXPECTED_PUBLIC_PACKAGE_VERSION) {
+		versionFindings.push(`Cargo.toml workspace.package version ${cargoVersion} != ${EXPECTED_PUBLIC_PACKAGE_VERSION}`);
+	}
+
+	return {
+		name: "package version/binary allowlist",
+		passed: versionFindings.length === 0 && nameFindings.length === 0 && binaryFindings.length === 0,
+		details: [
+			`package name findings: ${nameFindings.join("; ") || "<none>"}`,
+			`version findings: ${versionFindings.join("; ") || "<none>"}`,
+			`binary findings: ${binaryFindings.join("; ") || "<none>"}`,
+		],
 	};
 }
 
@@ -210,6 +299,42 @@ async function verifyPublicDefinitionContent(): Promise<GateResult> {
 		name: "approved public skill content",
 		passed: findings.length === 0,
 		details: [`forbidden public skill references: ${findings.join(", ") || "<none>"}`],
+	};
+}
+
+
+async function verifyBroadWorkflowExposure(): Promise<GateResult> {
+	const findings: string[] = [];
+	const codingPackage = await readJson("packages/coding-agent/package.json");
+	const exportsRecord = isRecord(codingPackage.exports) ? codingPackage.exports : {};
+	for (const exportKey of FORBIDDEN_PUBLIC_WORKFLOW_EXPORT_BLOCKS) {
+		if (exportsRecord[exportKey] !== null) findings.push(`packages/coding-agent/package.json exports ${exportKey} is not blocked`);
+	}
+
+	const publicDefinitionRoots = [".omp/skills", ".codex/skills", ".omp/agents", ".codex/agents", ".omp/commands", ".codex/commands", ".omp/rules", ".codex/rules"];
+	for (const root of publicDefinitionRoots) {
+		const absolute = path.join(repoRoot, root);
+		if (!fs.existsSync(absolute)) continue;
+		for (const entry of fs.readdirSync(absolute, { withFileTypes: true })) {
+			const visibleName = entry.name.replace(/\.(md|toml)$/u, "");
+			if (!EXPECTED_DEFINITIONS.includes(visibleName as (typeof EXPECTED_DEFINITIONS)[number])) {
+				findings.push(`${root}/${entry.name}: unexpected public definition`);
+			}
+		}
+	}
+
+	const activeSkillTexts = EXPECTED_DEFINITIONS.map(definition => [`.omp/skills/${definition}/SKILL.md`, fs.readFileSync(path.join(repoRoot, `.omp/skills/${definition}/SKILL.md`), "utf8")] as const);
+	for (const [relativePath, text] of activeSkillTexts) {
+		for (const token of FORBIDDEN_WORKFLOW_SURFACE_TOKENS) {
+			const pattern = new RegExp(`(?:\\$|\\bgjc\\s+|\\bomx\\s+)${escapeRegExp(token)}\\b`, "u");
+			if (pattern.test(text)) findings.push(`${relativePath}: exposes ${token}`);
+		}
+	}
+
+	return {
+		name: "broad workflow/agent exposure scan",
+		passed: findings.length === 0,
+		details: [`findings: ${findings.join("; ") || "<none>"}`],
 	};
 }
 
@@ -381,6 +506,19 @@ async function verifyRustBoundary(): Promise<GateResult> {
 			`check:rs invokes Rust scope guard: ${hasScopeHook}`,
 		],
 	};
+}
+
+function listPackageJsonPaths(): string[] {
+	const paths = ["package.json"];
+	const packagesRoot = path.join(repoRoot, "packages");
+	for (const entry of fs.readdirSync(packagesRoot, { withFileTypes: true })) {
+		if (entry.isDirectory()) paths.push(path.join("packages", entry.name, "package.json"));
+	}
+	return paths.filter(relativePath => fs.existsSync(path.join(repoRoot, relativePath))).sort();
+}
+
+function escapeRegExp(value: string): string {
+	return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
 async function readJson(relativePath: string): Promise<Record<string, unknown>> {
