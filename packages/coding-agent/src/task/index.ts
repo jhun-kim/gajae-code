@@ -144,7 +144,8 @@ function renderDescription(
 ): string {
 	const spawningDisabled = parentSpawns === "";
 	let filteredAgents = filterVisibleAgents(agents);
-	filteredAgents = disabledAgents.length > 0 ? filteredAgents.filter(a => !disabledAgents.includes(a.name)) : filteredAgents;
+	filteredAgents =
+		disabledAgents.length > 0 ? filteredAgents.filter(a => !disabledAgents.includes(a.name)) : filteredAgents;
 	if (spawningDisabled) {
 		filteredAgents = [];
 	} else if (parentSpawns !== "*") {
@@ -580,9 +581,10 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		// Validate agent exists
 		const agent = getAgent(agents, agentName);
 		if (!agent) {
-		const available = filterVisibleAgents(agents)
-			.map(a => a.name)
-			.join(", ") || "none";
+			const available =
+				filterVisibleAgents(agents)
+					.map(a => a.name)
+					.join(", ") || "none";
 			return {
 				content: [
 					{

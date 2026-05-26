@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "bun:test";
 import { Settings } from "../../src/config/settings";
-import { loadBundledAgents } from "../../src/task/agents";
 import { TaskTool } from "../../src/task";
+import { loadBundledAgents } from "../../src/task/agents";
 import * as discoveryModule from "../../src/task/discovery";
 import type { AgentDefinition, TaskParams } from "../../src/task/types";
 import type { ToolSession } from "../../src/tools";
@@ -31,9 +31,7 @@ describe("task agent visibility", () => {
 	it("marks bundled support agents as hidden", () => {
 		const agents = loadBundledAgents();
 		expect(agents.length).toBeGreaterThan(0);
-		expect(agents.map(agent => [agent.name, agent.hide])).toEqual(
-			agents.map(agent => [agent.name, true]),
-		);
+		expect(agents.map(agent => [agent.name, agent.hide])).toEqual(agents.map(agent => [agent.name, true]));
 	});
 
 	it("omits hidden agents from task tool descriptions and unknown-agent hints", async () => {
