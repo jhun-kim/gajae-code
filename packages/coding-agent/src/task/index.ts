@@ -803,7 +803,13 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 			};
 
 			if (!isSpawnAllowed()) {
-				const allowed = parentSpawns === "" ? "none (spawns disabled for this agent)" : parentSpawns;
+				const allowed =
+					parentSpawns === ""
+						? "none (spawns disabled for this agent)"
+						: filterVisibleAgents(agents)
+								.filter(candidate => allowedSpawns.includes(candidate.name))
+								.map(candidate => candidate.name)
+								.join(", ") || "none";
 				return {
 					content: [{ type: "text", text: `Cannot spawn '${agentName}'. Allowed: ${allowed}` }],
 					details: {
