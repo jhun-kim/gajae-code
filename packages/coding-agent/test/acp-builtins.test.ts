@@ -555,61 +555,22 @@ describe("wave 3 commands", () => {
 });
 
 describe("wave 4 commands", () => {
-	// /mcp
-	it("/mcp (no args): outputs help text containing list, enable, disable, remove, reload", async () => {
-		const { output, runtime } = createRuntime();
-		const result = await executeAcpBuiltinSlashCommand("/mcp", runtime);
-		expect(result).toEqual({ consumed: true });
-		expect(output[0]).toContain("list");
-		expect(output[0]).toContain("enable");
-		expect(output[0]).toContain("disable");
-		expect(output[0]).toContain("remove");
-		expect(output[0]).toContain("reload");
-	});
-
-	it("/mcp help: outputs help text containing list, enable, disable, remove, reload", async () => {
-		const { output, runtime } = createRuntime();
-		const result = await executeAcpBuiltinSlashCommand("/mcp help", runtime);
-		expect(result).toEqual({ consumed: true });
-		expect(output[0]).toContain("list");
-		expect(output[0]).toContain("enable");
-		expect(output[0]).toContain("disable");
-		expect(output[0]).toContain("remove");
-		expect(output[0]).toContain("reload");
-	});
-
-	it("/mcp add (no args): returns usage string", async () => {
-		const { output, runtime } = createRuntime();
-		const result = await executeAcpBuiltinSlashCommand("/mcp add", runtime);
-		expect(result).toEqual({ consumed: true });
-		expect(output[0]).toContain("Usage");
-	});
-
-	it("/mcp reload: calls refreshCommands and outputs confirmation", async () => {
-		let refreshCalled = false;
-		const { output, runtime } = createRuntime();
-		runtime.refreshCommands = () => {
-			refreshCalled = true;
-		};
-		const result = await executeAcpBuiltinSlashCommand("/mcp reload", runtime);
-		expect(result).toEqual({ consumed: true });
-		expect(refreshCalled).toBe(true);
-		expect(output[0]).toContain("reload");
-	});
-
-	it("/mcp resources: outputs server list or no-server message", async () => {
-		const { output, runtime } = createRuntime();
-		const result = await executeAcpBuiltinSlashCommand("/mcp resources", runtime);
-		expect(result).toEqual({ consumed: true });
-		// No servers configured in tmp project dir — should report that
-		expect(output[0]).toMatch(/No MCP servers configured|No resources/);
-	});
-
-	it("/mcp unknown-verb: returns usage pointing to help", async () => {
-		const { output, runtime } = createRuntime();
-		const result = await executeAcpBuiltinSlashCommand("/mcp frobnicate", runtime);
-		expect(result).toEqual({ consumed: true });
-		expect(output[0]).toContain("Unknown");
+	// /mcp is intentionally not an ACP builtin in gajae-code. MCP-compatible
+	// helpers may remain private, but the default user-facing ACP command surface
+	// must fall through instead of advertising or handling /mcp.
+	it("/mcp commands fall through to the model for MCP quarantine", async () => {
+		const commands = ["/mcp", "/mcp help", "/mcp add", "/mcp reload", "/mcp resources", "/mcp frobnicate"];
+		for (const command of commands) {
+			const { output, runtime } = createRuntime();
+			let refreshCalled = false;
+			runtime.refreshCommands = () => {
+				refreshCalled = true;
+			};
+			const result = await executeAcpBuiltinSlashCommand(command, runtime);
+			expect(result).toBe(false);
+			expect(output).toEqual([]);
+			expect(refreshCalled).toBe(false);
+		}
 	});
 
 	// /ssh
@@ -718,22 +679,9 @@ describe("wave 4 commands", () => {
 });
 
 describe("wave 5 — adapters and polish", () => {
-	// /mcp help lists new subcommands
-	it("/mcp help: lists resources, prompts, test, add, smithery-search", async () => {
-		const { output, runtime } = createRuntime();
-		const result = await executeAcpBuiltinSlashCommand("/mcp help", runtime);
-		expect(result).toEqual({ consumed: true });
-		expect(output[0]).toContain("resources");
-		expect(output[0]).toContain("prompts");
-		expect(output[0]).toContain("test");
-		expect(output[0]).toContain("add");
-		expect(output[0]).toContain("smithery-search");
-	});
-
-	// /mcp add — verify parsing and output message
-	it("/mcp add foo --url https://example.com --token X --scope project: outputs success or propagates write error", async () => {
-		// Uses project scope so it writes to /tmp/project/.omp/mcp.json which test infra controls.
-		// We verify the command either reports success or a meaningful error (not a parse error).
+	// /mcp add stays quarantined from ACP and must not write config through the
+	// private MCP helper when submitted as text-mode slash input.
+	it("/mcp add falls through without writing MCP config", async () => {
 		const mcpModule = await import("../src/runtime-mcp/config-writer");
 		const spy = spyOn(mcpModule, "addMCPServer").mockResolvedValue(undefined);
 		try {
@@ -742,32 +690,19 @@ describe("wave 5 — adapters and polish", () => {
 				"/mcp add foo --url https://example.com --token X --scope project",
 				runtime,
 			);
-			expect(result).toEqual({ consumed: true });
-			expect(output[0]).toContain('Added MCP server "foo" (project).');
-			expect(spy).toHaveBeenCalledTimes(1);
-			// Lock in the parsed call shape so future regressions in
-			// `--url` / `--token` / `--scope` parsing fail this test instead of
-			// silently writing a different config.
-			const [configPath, serverName, serverConfig] = spy.mock.calls[0]!;
-			expect(configPath).toContain("project");
-			expect(serverName).toBe("foo");
-			expect(serverConfig).toMatchObject({
-				type: "http",
-				url: "https://example.com",
-				headers: { Authorization: "Bearer X" },
-			});
+			expect(result).toBe(false);
+			expect(output).toEqual([]);
+			expect(spy).not.toHaveBeenCalled();
 		} finally {
 			spy.mockRestore();
 		}
 	});
 
-	// /mcp test — spy on connectToServer
-	it("/mcp test bogus: returns error when server not found in config", async () => {
+	it("/mcp test falls through without producing MCP-specific output", async () => {
 		const { output, runtime } = createRuntime();
-		// No servers in /tmp/project config — server not found
 		const result = await executeAcpBuiltinSlashCommand("/mcp test bogus", runtime);
-		expect(result).toEqual({ consumed: true });
-		expect(output[0]).toContain("not found");
+		expect(result).toBe(false);
+		expect(output).toEqual([]);
 	});
 
 	// /ssh add — spy on addSSHHost

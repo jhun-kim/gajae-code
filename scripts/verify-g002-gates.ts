@@ -122,8 +122,11 @@ async function verifyMcpQuarantine(): Promise<GateResult> {
 	const exposedMcpKeys = mcpExportKeys.filter(key => exportsRecord[key] !== null);
 	const blockedMcpKeys = mcpExportKeys.filter(key => exportsRecord[key] === null);
 	const builtinRegistry = await readText("packages/coding-agent/src/slash-commands/builtin-registry.ts");
+	const acpBuiltins = await readText("packages/coding-agent/src/slash-commands/acp-builtins.ts");
 	const exposesMcpBuiltin = /name:\s*["']mcp["']/.test(builtinRegistry);
 	const importsMcpBuiltinHandler = builtinRegistry.includes("handleMcpAcp");
+	const acpReferencesMcpHandler = acpBuiltins.includes("handleMcpAcp");
+	const acpAdvertisesMcpCommand = /name:\s*["']mcp["']/.test(acpBuiltins);
 	const internalMcpPaths = [
 		"packages/coding-agent/src/mcp",
 		"packages/coding-agent/src/modes/controllers/mcp-command-controller.ts",
@@ -136,12 +139,19 @@ async function verifyMcpQuarantine(): Promise<GateResult> {
 		`blocked MCP package keys: ${blockedMcpKeys.join(", ") || "<none>"}`,
 		`default /mcp builtin registered: ${exposesMcpBuiltin}`,
 		`default /mcp handler imported: ${importsMcpBuiltinHandler}`,
+		`ACP /mcp command advertised: ${acpAdvertisesMcpCommand}`,
+		`ACP MCP handler referenced: ${acpReferencesMcpHandler}`,
 		`private MCP implementation paths retained: ${presentInternalMcpPaths.join(", ") || "<none>"}`,
 	];
 
 	return {
 		name: "MCP quarantine/no default discoverable MCP",
-		passed: exposedMcpKeys.length === 0 && !exposesMcpBuiltin && !importsMcpBuiltinHandler,
+		passed:
+			exposedMcpKeys.length === 0 &&
+			!exposesMcpBuiltin &&
+			!importsMcpBuiltinHandler &&
+			!acpAdvertisesMcpCommand &&
+			!acpReferencesMcpHandler,
 		details,
 	};
 }
